@@ -133,8 +133,6 @@ class MLPlay:
         self.prev_sa = (None, None)
         self.episode_reward = 0
         self.step = 0
-
-
         #**********************************************************************************************************#
     def preprocess(self, state):
         img_array = PAIA.image_to_array(state.observation.images.front.data)  # img_array.shape = (112, 252, 3)
@@ -179,7 +177,6 @@ class MLPlay:
         # 3. Store the datas into ReplayedBuffer
         # 4. Update Epsilon value
         # 5. Train Q-Network
-
         MAX_EPISODES = int(ENV.get('MAX_EPISODES') or -1)
 
         if not state.observation.images.front.data:
@@ -262,7 +259,7 @@ class MLPlay:
 
                 #********************************************************************#
 
-        
+
         ##logging.debug(PAIA.action_info(action))
         self.step += 1
         return action
