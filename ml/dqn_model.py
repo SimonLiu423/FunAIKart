@@ -4,9 +4,9 @@ import torch.nn as nn
 import numpy as np
 
 
-class DQN(nn.Module):
+class QNet(nn.Module):
     def __init__(self, input_shape, n_actions):
-        super(DQN, self).__init__()
+        super(QNet, self).__init__()
 
         self.conv = nn.Sequential(
             nn.Conv2d(input_shape[0], 32, kernel_size=8, stride=2),
