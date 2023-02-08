@@ -1,1 +1,5 @@
 venv/
+autosave/
+.idea/
+ml/__pycache__
+kart/

@@ -8,6 +8,8 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 import collections
+from dqn_model import *
+import matplotlib.pyplot as plt
 
 Experience = collections.namedtuple('Experience', field_names=['state', 'action', 'reward', 'done', 'new_state'])
 class ExperienceBuffer:
@@ -74,7 +76,7 @@ class DeepQNetwork():
         expected_state_action_values = next_state_values * self.gamma + rewards_v
         return nn.MSELoss()(state_action_values, expected_state_action_values)
 
-    def choose_action(self, state, epsilon=0):
+    def choose_action(self, state, epsilon=0.0):
         if np.random.random() < epsilon:
             act_v = np.random.randint(self.n_actions)
         else:
@@ -115,12 +117,50 @@ class MLPlay:
         self.total_rewards = []
         self.best_mean = 0
         # TODO create any variables you need **********************************************************************#
-        
-
+        self.action_space = [
+            (False, False, 0.0),
+            (True, False, 0.0),
+            (True, False, -1.0),
+            (True, False, 1.0),
+            (False, True, 0.0),
+            (False, True, -1.0),
+            (False, True, 1.0),
+        ]
+        self.n_actions = len(self.action_space)
+        self.img_size = (100, 100)
+        self.agent = DeepQNetwork(self.n_actions, (1, *self.img_size), QNet, device='cuda')
+        self.prev_progress = 0
+        self.prev_sa = (None, None)
+        self.episode_reward = 0
+        self.step = 0
 
 
         #**********************************************************************************************************#
+    def preprocess(self, state):
+        img_array = PAIA.image_to_array(state.observation.images.front.data)  # img_array.shape = (112, 252, 3)
+        # TODO Image Preprocessing ****************#
+        # Hint:
+        #      GrayScale: img  = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+        #      Resize:    img  = cv2.resize(img, (width, height))
+        resized_img = cv2.resize(img_array, self.img_size)
+        gray_img = cv2.cvtColor(resized_img, cv2.COLOR_BGR2GRAY)
+        return gray_img
 
+    def get_reward(self, state):
+        progress = state.observation.progress
+        if progress > self.prev_progress:
+            ret = 1.0
+        elif progress == self.prev_progress:
+            ret = -1.0
+        else:
+            ret = -2.0
+        self.prev_progress = progress
+        if state.event in [PAIA.Event.EVENT_TIMEOUT, PAIA.Event.EVENT_UNDRIVABLE]:
+            ret = -100
+        elif state.event == PAIA.Event.EVENT_WIN:
+            ret = 100
+
+        return ret
     def decision(self, state: PAIA.State) -> PAIA.Action:
         '''
         Implement yor main algorithm here.
@@ -141,39 +181,37 @@ class MLPlay:
         # 5. Train Q-Network
 
         MAX_EPISODES = int(ENV.get('MAX_EPISODES') or -1)
-        if state.observation.images.front.data:
-            img_array = PAIA.image_to_array(state.observation.images.front.data) #img_array.shape = (112, 252, 3)
-            # TODO Image Preprocessing ****************#
-            # Hint: 
-            #      GrayScale: img  = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-            #      Resize:    img  = cv2.resize(img, (width, height))
 
+        if not state.observation.images.front.data:
+            return PAIA.create_action_object(*self.action_space[1])
 
-            # ****************************************#
-        else:
-            img_array = None
+        state_img = self.preprocess(state)
+        plt.imshow(state_img)
+        plt.show()
+        state_img = state_img[np.newaxis, ...]
 
+        r = self.get_reward(state)
 
+        done = state.event in [PAIA.Event.EVENT_RESTART, PAIA.Event.EVENT_FINISH]
 
-
-
-
-
-
-
+        if self.prev_sa is not (None, None):
+            self.agent.store_transition(self.prev_sa[0], self.prev_sa[1], r, done, state_img)
+            if self.step % 100 == 0:
+                logging.info('Stored transition, (action: {}, reward: {})'.format(self.prev_sa[1], r))
+            self.episode_reward += r
+        self.agent.learn()
 
         #*********************************************************************************************************#
 
-
-        action = PAIA.create_action_object(acceleration=True, brake=False, steering=0.0)
         if state.event == PAIA.Event.EVENT_NONE:
             # Continue the game
 
             # TODO You can decide your own action (change the following action to yours) *****************************#
-            action = PAIA.create_action_object(acceleration=True, brake=False, steering=0.0)
+            self.epsilon = epsilon_compute(frame_id=self.step)
+            action_id = self.agent.choose_action(state_img, self.epsilon)
+            action = PAIA.create_action_object(*self.action_space[action_id])
 
-
-
+            self.prev_sa = (state_img, action_id)
 
             #*********************************************************************************************************#
 
@@ -184,10 +222,12 @@ class MLPlay:
             # You can decide your own action (change the following action to yours)
 
             # TODO Do anything you want when the game reset *********************************************************#
+
             self.episode_number += 1
-
-
-
+            self.prev_sa = (None, None)
+            self.episode_reward = 0
+            self.step = 0
+            action = PAIA.create_action_object(*self.action_space[1])
 
 
             #*********************************************************************************************************#
@@ -211,19 +251,20 @@ class MLPlay:
                 #self.demo.create_step(state=state, action=action)
                 # You can export your replay buffer
                 #self.demo.export('kart.paia')
-            self.total_rewards.append(self.progress)
-            logging.info('Epispde: ' + str(self.episode_number)+ ', Epsilon: ' + str(self.epsilon) + ', Progress: %.3f' %self.progress )
+            self.total_rewards.append(self.episode_reward)
+            logging.info('Epispde: ' + str(self.episode_number)+ ', Epsilon: ' + str(self.epsilon) + ', Progress: %.3f' %self.progress + ', Reward: ' + str(self.episode_reward) )
             mean_reward = np.mean(self.total_rewards[-30:])
             if self.best_mean < mean_reward:
                 print("Best mean reward updated %.3f -> %.3f, model saved" % (self.best_mean, mean_reward))
                 self.best_mean = mean_reward
                 # TODO save your model ***********************************************#
-
+                self.agent.save_model()
 
                 #********************************************************************#
 
         
         ##logging.debug(PAIA.action_info(action))
+        self.step += 1
         return action
     
     def autosave(self):
