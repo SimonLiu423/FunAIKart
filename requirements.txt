@@ -1,0 +1,10 @@
+mlagents==0.26.0
+torch==1.6.0
+numpy==1.23.5
+Pillow
+opencv-python
+paramiko
+ffmpeg-python
+python-dotenv
+python-ffmpeg-video-streaming
+protobuf==3.19.0

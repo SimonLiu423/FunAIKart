@@ -1,0 +1,103 @@
+syntax = "proto3";
+
+// api_version: PAIA_Kart_1.0
+
+enum Event {
+	EVENT_NONE = 0;
+	EVENT_FINISH = 1;
+	EVENT_RESTART = 2;
+	EVENT_WIN = 3;
+	EVENT_TIMEOUT = 4;
+	EVENT_UNDRIVABLE = 5;
+}
+
+message State {
+  message Observation {
+		message Ray {
+			optional bool hit = 1;
+			optional float distance = 2;
+		}
+		message RayList {
+			optional Ray F = 1;
+			optional Ray B = 2;
+			optional Ray R = 3;
+			optional Ray L = 4;
+			optional Ray FR = 5;
+			optional Ray RF = 6;
+			optional Ray FL = 7;
+			optional Ray LF = 8;
+			optional Ray BR = 9;
+			optional Ray BL = 10;
+		}
+		message Image {
+			optional bytes data = 1;
+			optional int32 height = 2;
+			optional int32 width = 3;
+			optional int32 channels = 4;
+		}
+		message ImageList {
+			optional Image front = 1;
+			optional Image back = 2;
+		}
+		message Refill {
+			optional float value = 1;
+		}
+		message RefillList {
+			optional Refill wheel = 1;
+			optional Refill gas = 2;
+		}
+		message Effect {
+			optional int32 number = 1;
+		}
+		message EffectList {
+			optional Effect nitro = 1;
+			optional Effect turtle = 2;
+			optional Effect banana = 3;
+		}
+		optional RayList rays = 1;
+		optional ImageList images = 2;
+		optional float progress = 3;
+		optional float usedtime = 4;
+		optional float velocity = 5;
+		optional RefillList refills = 6;
+		optional EffectList effects = 7;
+	}
+	optional string api_version = 1;
+	optional string id = 2;
+	optional Observation observation = 3;
+	optional Event event = 4;
+	optional float reward = 5;
+}
+
+enum Command {
+	COMMAND_GENERAL = 0;
+	COMMAND_START = 1;
+	COMMAND_FINISH = 2;
+	COMMAND_RESTART = 3;
+}
+
+message Action {
+	optional string api_version = 1;
+	optional string id = 2;
+	optional Command command = 3;
+	optional bool acceleration = 4;
+	optional bool brake = 5;
+	optional float steering = 6;
+}
+
+message Step {
+	optional State state = 1;
+	optional Action action = 2;
+}
+
+message Episode {
+	repeated Step steps = 1;
+}
+
+message Demo {
+	repeated Episode episodes = 1;
+}
+
+service PAIA {
+  rpc hook(Action) returns (State) {}
+}
