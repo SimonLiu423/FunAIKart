@@ -144,10 +144,26 @@ class MLPlay:
         self.curr_state = None
         self.state_front_stack = []
         self.state_back_stack = []
+        self.effects = {'n': 0, 't': 0, 'b': 0, 'w': 0, 'g': 0}
 
-        self.agent = DeepQNetwork(self.n_actions, (self.k * 2, *self.img_size), QNet, device='cuda')
+
+        self.agent = DeepQNetwork(self.n_actions, (self.k * 2, *self.img_size), QNet, device='cpu')
         # self.agent.net.load_state_dict(torch.load('./saves/best_0.pt'))
         # **********************************************************************************************************#
+
+    # def effect_diff(self, state):
+    #     self.new_effects = {
+    #         'n': state.observation.effects.nitro,
+    #         't': state.observation.effects.nitro,
+    #         'b': state.observation.effects.nitro,
+    #         'w': state.observation.effects.nitro,
+    #         'g': state.observation.effects.nitro,
+    #     }
+    #     diff = {
+    #         'n': state.observation.effects.nitro - self.effects['n'],
+    #         't': state.observation.effects.turtle - self.effects['t'],
+    #
+    #     }
 
     def preprocess(self, state):
         front_img_array = PAIA.image_to_array(state.observation.images.front.data)  # img_array.shape = (112, 252, 3)
@@ -172,6 +188,7 @@ class MLPlay:
             ret += -1.0
         else:
             ret += -2.0
+        self.prev_progress = progress
 
         if state.observation.rays.F.distance <= 0.05 or \
                 state.observation.rays.B.distance <= 0.05 or \
@@ -185,7 +202,8 @@ class MLPlay:
                 state.observation.rays.BL.distance <= 0.05:
             ret += -3
 
-        self.prev_progress = progress
+        # TODO get item reward
+
         if state.event in [PAIA.Event.EVENT_TIMEOUT, PAIA.Event.EVENT_UNDRIVABLE]:
             ret += -5
         elif state.event == PAIA.Event.EVENT_WIN:
@@ -212,43 +230,58 @@ class MLPlay:
         # 5. Train Q-Network
         MAX_EPISODES = int(ENV.get('MAX_EPISODES') or -1)
 
+        if state.event == PAIA.Event.EVENT_RESTART:
+            logging.info('EVENT_RESTART')
+
+            self.episode_number += 1
+            self.episode_reward = 0
+
+            self.prev_progress = 0
+            self.step = 0
+            self.cnt = 0
+            self.action_id = 1
+            self.state_front_stack = []
+            self.state_back_stack = []
+
         self.step += 1
 
         if not state.observation.images.front.data:
             return PAIA.create_action_object(*self.action_space[1])
 
         state_front_img, state_back_img = self.preprocess(state)
-        state_front_img = state_front_img[np.newaxis, ...]
+        state_front_img = state_front_img[np.newaxis, ...]      # (width, height) => (1, width, height)
         state_back_img = state_back_img[np.newaxis, ...]
         self.state_front_stack.append(state_front_img)
         self.state_back_stack.append(state_back_img)
 
         self.agent.learn()
-        # logging.info('Step: {}'.format(self.step))
+        logging.info('Step: {}'.format(self.step))
 
-        if self.step >= 44 and self.step % self.k == 0:
+        if self.step >= 75 and self.step % self.k == 0:
+            delta_progress = (state.observation.progress - self.prev_progress) * 1000
+            if delta_progress < 0.1:
+                self.cnt += 1
+            else:
+                self.cnt = 0
+
             r = self.get_reward(state)
             done = (state.event in [PAIA.Event.EVENT_RESTART, PAIA.Event.EVENT_FINISH])
 
             self.episode_reward += r
 
-            if r < 0.1:
-                self.cnt += 1
-            else:
-                self.cnt = 0
-
             stacked_state = self.state_front_stack + self.state_back_stack
+            # [(1, width, height), (1, width, height), ...] => (k, width, height)
             stacked_img = np.concatenate(stacked_state, axis=0)
             self.agent.store_transition(self.curr_state, self.action_id, r, done, stacked_img)
 
         if self.step % self.k == 0:
             stacked_state = self.state_front_stack + self.state_back_stack
-            stacked_img = np.concatenate(stacked_state, axis=0)
+            stacked_img = np.concatenate(stacked_state, axis=0)     # (k*2, width, height)
             self.curr_state = stacked_img
             self.state_back_stack = []
             self.state_front_stack = []
 
-            self.frame_idx += 1
+            self.frame_idx += 1     # nth state
             self.epsilon = epsilon_compute(frame_id=self.frame_idx)
             # self.epsilon = 0
             self.action_id = self.agent.choose_action(self.curr_state, self.epsilon)
@@ -256,7 +289,7 @@ class MLPlay:
         # *********************************************************************************************************#
 
         action = PAIA.create_action_object(True, False, 0.0)
-        if self.episode_number < MAX_EPISODES and self.cnt > 10:
+        if (MAX_EPISODES < 0 or self.episode_number < MAX_EPISODES) and self.cnt > 10:
             self.total_rewards.append(self.episode_reward)
             logging.info('Epispde: ' + str(self.episode_number) + ', Epsilon: ' + str(
                 self.epsilon) + ', Progress: %.3f' % state.observation.progress + ', Reward: ' + str(self.episode_reward))
@@ -267,6 +300,16 @@ class MLPlay:
                 self.agent.save_model()
 
             action = PAIA.create_action_object(command=PAIA.Command.COMMAND_RESTART)
+            #
+            # self.episode_number += 1
+            # self.episode_reward = 0
+            #
+            # self.prev_progress = 0
+            # self.step = 0
+            # self.cnt = 0
+            # self.action_id = 1
+            # self.state_front_stack = []
+            # self.state_back_stack = []
         elif state.event == PAIA.Event.EVENT_NONE:
             # Continue the game
 
@@ -281,17 +324,17 @@ class MLPlay:
             # You can decide your own action (change the following action to yours)
 
             # TODO Do anything you want when the game reset *********************************************************#
-
-            self.episode_number += 1
-            self.episode_reward = 0
-
-            self.prev_progress = 0
-            self.step = 0
-            self.cnt = 0
-            self.action_id = 1
-            self.state_front_stack = []
-            self.state_back_stack = []
-
+            pass
+            #
+            # self.total_rewards.append(self.episode_reward)
+            # logging.info('Epispde: ' + str(self.episode_number) + ', Epsilon: ' + str(
+            #     self.epsilon) + ', Progress: %.3f' % state.observation.progress + ', Reward: ' + str(
+            #     self.episode_reward))
+            # mean_reward = np.mean(self.total_rewards[-30:])
+            # if self.best_mean < mean_reward:
+            #     print("Best mean reward updated %.3f -> %.3f, model saved" % (self.best_mean, mean_reward))
+            #     self.best_mean = mean_reward
+            #     self.agent.save_model()
             # *********************************************************************************************************#
 
             # You can start a new episode and save the step to the replay buffer (self.demo)
@@ -320,10 +363,18 @@ class MLPlay:
             if self.best_mean < mean_reward:
                 print("Best mean reward updated %.3f -> %.3f, model saved" % (self.best_mean, mean_reward))
                 self.best_mean = mean_reward
-                # TODO save your model ***********************************************#
                 self.agent.save_model()
 
-                # ********************************************************************#
+            # self.episode_number += 1
+            # self.episode_reward = 0
+            #
+            # self.prev_progress = 0
+            # self.step = 0
+            # self.cnt = 0
+            # self.action_id = 1
+            # self.state_front_stack = []
+            # self.state_back_stack = []
+
 
         ##logging.debug(PAIA.action_info(action))
         return action
