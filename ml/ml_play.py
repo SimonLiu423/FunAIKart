@@ -1,5 +1,5 @@
 import logging
-import os # you can use functions in logging: debug, info, warning, error, critical, log
+import os  # you can use functions in logging: debug, info, warning, error, critical, log
 from config import ENV
 import PAIA
 import cv2
@@ -9,9 +9,11 @@ import torch.nn as nn
 import torch.optim as optim
 import collections
 from dqn_model import *
-import matplotlib.pyplot as plt
+from datetime import datetime
 
 Experience = collections.namedtuple('Experience', field_names=['state', 'action', 'reward', 'done', 'new_state'])
+
+
 class ExperienceBuffer:
     def __init__(self, capacity):
         self.buffer = collections.deque(maxlen=capacity)
@@ -26,20 +28,21 @@ class ExperienceBuffer:
         indices = np.random.choice(len(self.buffer), batch_size, replace=False)
         states, actions, rewards, dones, next_states = zip(*[self.buffer[idx] for idx in indices])
         return np.array(states), np.array(actions), np.array(rewards, dtype=np.float32), \
-               np.array(dones, dtype=np.uint8), np.array(next_states)
+            np.array(dones, dtype=np.uint8), np.array(next_states)
+
 
 class DeepQNetwork():
     def __init__(
-        self,
-        n_actions,
-        input_shape,
-        qnet,
-        device,
-        learning_rate = 2e-4,
-        reward_decay = 0.99,
-        replace_target_iter = 1000,
-        memory_size = 10000,
-        batch_size = 32,
+            self,
+            n_actions,
+            input_shape,
+            qnet,
+            device,
+            learning_rate=2e-4,
+            reward_decay=0.99,
+            replace_target_iter=1000,
+            memory_size=10000,
+            batch_size=32,
     ):
         # initialize parameters
         self.n_actions = n_actions
@@ -67,7 +70,8 @@ class DeepQNetwork():
         rewards_v = torch.tensor(rewards).to(self.device)
         done_mask = torch.BoolTensor(dones).to(self.device)
 
-        state_action_values = self.net(states_v.float()).gather( 1, actions_v.unsqueeze(-1).type(torch.int64)).squeeze(-1)
+        state_action_values = self.net(states_v.float()).gather(1, actions_v.unsqueeze(-1).type(torch.int64)).squeeze(
+            -1)
         with torch.no_grad():
             next_state_values = self.tgt_net(next_states_v.float()).max(1)[0]
             next_state_values[done_mask] = 0.0
@@ -88,7 +92,7 @@ class DeepQNetwork():
 
     def learn(self):
         # check to replace target parameters
-        if len(self.exp_buffer)>=self.batch_size:
+        if len(self.exp_buffer) >= self.batch_size:
             if self.learn_step_counter % self.replace_target_iter == 0:
                 self.tgt_net.load_state_dict(self.net.state_dict())
             self.optimizer.zero_grad()
@@ -100,17 +104,19 @@ class DeepQNetwork():
     def store_transition(self, s, a, r, d, s_):
         exp = Experience(s, a, r, d, s_)
         self.exp_buffer.append(exp)
-    
+
     def save_model(self):
         model_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "best_model.dat")
         torch.save(self.net.state_dict(), model_path)
 
+
 def epsilon_compute(frame_id, epsilon_max=1.0, epsilon_min=0.02, epsilon_decay=10000):
     return max(epsilon_min, epsilon_max - frame_id / epsilon_decay)
 
+
 class MLPlay:
     def __init__(self):
-        #self.demo = Demo.create_demo() # create a replay buffer
+        # self.demo = Demo.create_demo() # create a replay buffer
         self.episode_number = 1
         self.epsilon = 1.0
         self.progress = 0
@@ -133,7 +139,11 @@ class MLPlay:
         self.prev_sa = (None, None)
         self.episode_reward = 0
         self.step = 0
-        #**********************************************************************************************************#
+        self.total_steps = 0
+
+        self.agent.net.load_state_dict(torch.load('./saves/best_0.pt'))
+        # **********************************************************************************************************#
+
     def preprocess(self, state):
         img_array = PAIA.image_to_array(state.observation.images.front.data)  # img_array.shape = (112, 252, 3)
         # TODO Image Preprocessing ****************#
@@ -152,13 +162,27 @@ class MLPlay:
             ret = -1.0
         else:
             ret = -2.0
+
+        if state.observation.rays.F.distance <= 0.05 or \
+                state.observation.rays.B.distance <= 0.05 or \
+                state.observation.rays.R.distance <= 0.05 or \
+                state.observation.rays.L.distance <= 0.05 or \
+                state.observation.rays.FR.distance <= 0.05 or \
+                state.observation.rays.RF.distance <= 0.05 or \
+                state.observation.rays.FL.distance <= 0.05 or \
+                state.observation.rays.LF.distance <= 0.05 or \
+                state.observation.rays.BR.distance <= 0.05 or \
+                state.observation.rays.BL.distance <= 0.05:
+            ret = -3
+
         self.prev_progress = progress
         if state.event in [PAIA.Event.EVENT_TIMEOUT, PAIA.Event.EVENT_UNDRIVABLE]:
-            ret = -100
+            ret = -5
         elif state.event == PAIA.Event.EVENT_WIN:
-            ret = 100
+            ret = 10
 
         return ret
+
     def decision(self, state: PAIA.State) -> PAIA.Action:
         '''
         Implement yor main algorithm here.
@@ -169,7 +193,6 @@ class MLPlay:
         #       state.observation.images.front.data and 
         #       state.observation.images.back.data to numpy array (range from 0 to 1)
         #       For example: img_array = PAIA.image_to_array(state.observation.images.front.data)
-        
 
         # TODO Reinforcement Learning Algorithm *******************************************************************#
         # 1. Preprocess
@@ -183,8 +206,6 @@ class MLPlay:
             return PAIA.create_action_object(*self.action_space[1])
 
         state_img = self.preprocess(state)
-        plt.imshow(state_img)
-        plt.show()
         state_img = state_img[np.newaxis, ...]
 
         r = self.get_reward(state)
@@ -193,27 +214,27 @@ class MLPlay:
 
         if self.prev_sa is not (None, None):
             self.agent.store_transition(self.prev_sa[0], self.prev_sa[1], r, done, state_img)
-            if self.step % 100 == 0:
-                logging.info('Stored transition, (action: {}, reward: {})'.format(self.prev_sa[1], r))
+            # if self.step % 100 == 0:
+                # logging.info('Stored transition, (action: {}, reward: {})'.format(self.prev_sa[1], r))
             self.episode_reward += r
         self.agent.learn()
 
-        #*********************************************************************************************************#
+        # *********************************************************************************************************#
 
         if state.event == PAIA.Event.EVENT_NONE:
             # Continue the game
 
             # TODO You can decide your own action (change the following action to yours) *****************************#
-            self.epsilon = epsilon_compute(frame_id=self.step)
+            self.epsilon = epsilon_compute(frame_id=self.total_steps, epsilon_decay=100000)
             action_id = self.agent.choose_action(state_img, self.epsilon)
             action = PAIA.create_action_object(*self.action_space[action_id])
 
             self.prev_sa = (state_img, action_id)
 
-            #*********************************************************************************************************#
+            # *********************************************************************************************************#
 
             # You can save the step to the replay buffer (self.demo)
-            #self.demo.create_step(state=state, action=action)
+            # self.demo.create_step(state=state, action=action)
         elif state.event == PAIA.Event.EVENT_RESTART:
             # You can do something when the game restarts by someone
             # You can decide your own action (change the following action to yours)
@@ -226,30 +247,30 @@ class MLPlay:
             self.step = 0
             action = PAIA.create_action_object(*self.action_space[1])
 
-
-            #*********************************************************************************************************#
+            # *********************************************************************************************************#
 
             # You can start a new episode and save the step to the replay buffer (self.demo)
-            #self.demo.create_episode()
-            #self.demo.create_step(state=state, action=action)
+            # self.demo.create_episode()
+            # self.demo.create_step(state=state, action=action)
         elif state.event != PAIA.Event.EVENT_NONE:
             # You can do something when the game (episode) ends
-            want_to_restart = True # Uncomment if you want to restart
+            want_to_restart = True  # Uncomment if you want to restart
             # want_to_restart = False # Uncomment if you want to finish
             if (MAX_EPISODES < 0 or self.episode_number < MAX_EPISODES) and want_to_restart:
                 # Do something when restart
                 action = PAIA.create_action_object(command=PAIA.Command.COMMAND_RESTART)
                 # You can save the step to the replay buffer (self.demo)
-                #self.demo.create_step(state=state, action=action)
+                # self.demo.create_step(state=state, action=action)
             else:
                 # Do something when finish
                 action = PAIA.create_action_object(command=PAIA.Command.COMMAND_FINISH)
                 # You can save the step to the replay buffer (self.demo)
-                #self.demo.create_step(state=state, action=action)
+                # self.demo.create_step(state=state, action=action)
                 # You can export your replay buffer
-                #self.demo.export('kart.paia')
+                # self.demo.export('kart.paia')
             self.total_rewards.append(self.episode_reward)
-            logging.info('Epispde: ' + str(self.episode_number)+ ', Epsilon: ' + str(self.epsilon) + ', Progress: %.3f' %self.progress + ', Reward: ' + str(self.episode_reward) )
+            logging.info('Epispde: ' + str(self.episode_number) + ', Epsilon: ' + str(
+                self.epsilon) + ', Progress: %.3f' % self.progress + ', Reward: ' + str(self.episode_reward))
             mean_reward = np.mean(self.total_rewards[-30:])
             if self.best_mean < mean_reward:
                 print("Best mean reward updated %.3f -> %.3f, model saved" % (self.best_mean, mean_reward))
@@ -257,14 +278,18 @@ class MLPlay:
                 # TODO save your model ***********************************************#
                 self.agent.save_model()
 
-                #********************************************************************#
-
+                # ********************************************************************#
 
         ##logging.debug(PAIA.action_info(action))
         self.step += 1
+        self.total_steps += 1
         return action
-    
+
     def autosave(self):
+        now = datetime.now()
+        fname = 'Episode_{}_{}{}_{}{}.pt'.format(str(self.episode_number).zfill(3), str(now.month).zfill(2), str(now.day).zfill(2), str(now.hour).zfill(2), str(now.minute).zfill(2))
+        model_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'autosave', fname)
+        torch.save(self.agent.net.state_dict(), model_path)
         '''
         self.autosave() will be called when the game restarts,
         You can save some important information in case that accidents happen.
