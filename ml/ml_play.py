@@ -267,6 +267,20 @@ class MLPlay:
         # logging.info('reward: {}'.format(ret))
         return ret
 
+    def print_event(self, event):
+        if event == PAIA.Event.EVENT_NONE:
+            print('EVENT_NONE')
+        if event == PAIA.Event.EVENT_FINISH:
+            print('EVENT_FINISH')
+        if event == PAIA.Event.EVENT_RESTART:
+            print('EVENT_RESTART')
+        if event == PAIA.Event.EVENT_WIN:
+            print('EVENT_WIN')
+        if event == PAIA.Event.EVENT_TIMEOUT:
+            print('EVENT_TIMEOUT')
+        if event == PAIA.Event.EVENT_UNDRIVABLE:
+            print('EVENT_UNDRIVABLE')
+
     def decision(self, state: PAIA.State) -> PAIA.Action:
         '''
         Implement yor main algorithm here.
@@ -285,6 +299,7 @@ class MLPlay:
         # 4. Update Epsilon value
         # 5. Train Q-Network
         MAX_EPISODES = int(ENV.get('MAX_EPISODES') or -1)
+        # self.print_event(state.event)
 
         if state.event == PAIA.Event.EVENT_RESTART:
             logging.info('EVENT_RESTART')
@@ -300,12 +315,13 @@ class MLPlay:
             self.state_back_stack = []
             self.effects = {'n': 0, 't': 0, 'b': 0, 'w': 1.0, 'g': 1.0}
 
-        self.step += 1
         if self.step % 100 == 0:
             print("Step: {}".format(self.step), end='')
 
         if not state.observation.images.front.data:
             return PAIA.create_action_object(*self.action_space[1])
+
+        self.step += 1
 
         state_front_img, state_back_img = self.preprocess(state)
         state_front_img = state_front_img[np.newaxis, ...]      # (width, height) => (1, width, height)
@@ -326,7 +342,8 @@ class MLPlay:
                 self.cnt = 0
 
             r = self.get_reward(state)
-            done = (state.event in [PAIA.Event.EVENT_RESTART, PAIA.Event.EVENT_FINISH])
+            done = (state.event in [PAIA.Event.EVENT_TIMEOUT, PAIA.Event.EVENT_FINISH, PAIA.Event.EVENT_WIN,
+                                    PAIA.Event.EVENT_UNDRIVABLE])
 
             self.episode_reward += r
             if self.step % 100 == 0:
@@ -347,9 +364,9 @@ class MLPlay:
             self.state_front_stack = []
 
             self.frame_idx += 1     # nth state
-            self.epsilon = epsilon_compute(frame_id=self.frame_idx)
+            self.epsilon = epsilon_compute(frame_id=self.frame_idx, epsilon_decay=50000)
             if self.step % 100 == 0:
-                print(', epsilon: {}'.format(self.epsilon))
+                print(', epsilon: {}, progress: {}'.format(self.epsilon, state.observation.progress))
             # self.epsilon = 0
             self.action_id = self.agent.choose_action(self.curr_state, state_info, self.epsilon)
 
@@ -447,10 +464,11 @@ class MLPlay:
         return action
 
     def autosave(self):
-        # now = datetime.now()
-        # fname = 'Episode_{}_{}{}_{}{}.pt'.format(str(self.episode_number).zfill(3), str(now.month).zfill(2), str(now.day).zfill(2), str(now.hour).zfill(2), str(now.minute).zfill(2))
-        # model_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'autosave', fname)
-        # torch.save(self.agent.net.state_dict(), model_path)
+        if self.episode_number % 10 == 0:
+            now = datetime.now()
+            fname = 'Episode_{}_{}{}_{}{}.pt'.format(str(self.episode_number).zfill(3), str(now.month).zfill(2), str(now.day).zfill(2), str(now.hour).zfill(2), str(now.minute).zfill(2))
+            model_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'autosave', fname)
+            torch.save(self.agent.net.state_dict(), model_path)
         '''
         self.autosave() will be called when the game restarts,
         You can save some important information in case that accidents happen.
