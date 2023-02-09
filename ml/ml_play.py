@@ -239,7 +239,6 @@ class MLPlay:
 
             stacked_state = self.state_front_stack + self.state_back_stack
             stacked_img = np.concatenate(stacked_state, axis=0)
-            logging.info(stacked_img.shape)
             self.agent.store_transition(self.curr_state, self.action_id, r, done, stacked_img)
 
         if self.step % self.k == 0:
