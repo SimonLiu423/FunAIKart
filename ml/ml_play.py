@@ -133,7 +133,7 @@ class MLPlay:
             (False, True, 1.0),
         ]
         self.n_actions = len(self.action_space)
-        self.img_size = (100, 100)
+        self.img_size = (32, 64)
         self.prev_progress = 0
         self.episode_reward = 0
         self.step = 0
@@ -158,7 +158,7 @@ class MLPlay:
             'w': state.observation.refills.wheel.value,
             'g': state.observation.refills.gas.value,
         }
-        logging.info('wheel: {}, gas: {}'.format(state.observation.refills.wheel.value, state.observation.refills.gas.value))
+        # logging.info('wheel: {}, gas: {}'.format(state.observation.refills.wheel.value, state.observation.refills.gas.value))
         diff = {
             'n': new_effects['n'] - self.effects['n'],
             't': new_effects['t'] - self.effects['t'],
@@ -176,10 +176,10 @@ class MLPlay:
         # Hint:
         #      GrayScale: img  = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
         #      Resize:    img  = cv2.resize(img, (width, height))
-        resized_front_img = cv2.resize(front_img_array, self.img_size)
+        resized_front_img = cv2.resize(front_img_array, (self.img_size[1], self.img_size[0]))
         gray_front_img = cv2.cvtColor(resized_front_img, cv2.COLOR_BGR2GRAY)
 
-        resized_back_img = cv2.resize(back_img_array, self.img_size)
+        resized_back_img = cv2.resize(back_img_array,  (self.img_size[1], self.img_size[0]))
         gray_back_img = cv2.cvtColor(resized_back_img, cv2.COLOR_BGR2GRAY)
         return gray_front_img, gray_back_img
 
@@ -226,7 +226,7 @@ class MLPlay:
         elif state.event == PAIA.Event.EVENT_WIN:
             ret += 10
 
-        logging.info('reward: {}'.format(ret))
+        # logging.info('reward: {}'.format(ret))
         return ret
 
     def decision(self, state: PAIA.State) -> PAIA.Action:
@@ -260,6 +260,7 @@ class MLPlay:
             self.action_id = 1
             self.state_front_stack = []
             self.state_back_stack = []
+            self.effects = {'n': 0, 't': 0, 'b': 0, 'w': 1.0, 'g': 1.0}
 
         self.step += 1
 
@@ -307,28 +308,28 @@ class MLPlay:
         # *********************************************************************************************************#
 
         action = PAIA.create_action_object(True, False, 0.0)
-        if (MAX_EPISODES < 0 or self.episode_number < MAX_EPISODES) and self.cnt > 10:
-            self.total_rewards.append(self.episode_reward)
-            logging.info('Epispde: ' + str(self.episode_number) + ', Epsilon: ' + str(
-                self.epsilon) + ', Progress: %.3f' % state.observation.progress + ', Reward: ' + str(self.episode_reward))
-            mean_reward = np.mean(self.total_rewards[-30:])
-            if self.best_mean < mean_reward:
-                print("Best mean reward updated %.3f -> %.3f, model saved" % (self.best_mean, mean_reward))
-                self.best_mean = mean_reward
-                self.agent.save_model()
-
-            action = PAIA.create_action_object(command=PAIA.Command.COMMAND_RESTART)
-            #
-            # self.episode_number += 1
-            # self.episode_reward = 0
-            #
-            # self.prev_progress = 0
-            # self.step = 0
-            # self.cnt = 0
-            # self.action_id = 1
-            # self.state_front_stack = []
-            # self.state_back_stack = []
-        elif state.event == PAIA.Event.EVENT_NONE:
+        # if (MAX_EPISODES < 0 or self.episode_number < MAX_EPISODES) and self.cnt > 10:
+        #     self.total_rewards.append(self.episode_reward)
+        #     logging.info('Epispde: ' + str(self.episode_number) + ', Epsilon: ' + str(
+        #         self.epsilon) + ', Progress: %.3f' % state.observation.progress + ', Reward: ' + str(self.episode_reward))
+        #     mean_reward = np.mean(self.total_rewards[-30:])
+        #     if self.best_mean < mean_reward:
+        #         print("Best mean reward updated %.3f -> %.3f, model saved" % (self.best_mean, mean_reward))
+        #         self.best_mean = mean_reward
+        #         self.agent.save_model()
+        #
+        #     action = PAIA.create_action_object(command=PAIA.Command.COMMAND_RESTART)
+        #     #
+        #     # self.episode_number += 1
+        #     # self.episode_reward = 0
+        #     #
+        #     # self.prev_progress = 0
+        #     # self.step = 0
+        #     # self.cnt = 0
+        #     # self.action_id = 1
+        #     # self.state_front_stack = []
+        #     # self.state_back_stack = []
+        if state.event == PAIA.Event.EVENT_NONE:
             # Continue the game
 
             # TODO You can decide your own action (change the following action to yours) *****************************#
