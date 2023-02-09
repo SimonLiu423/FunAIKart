@@ -121,7 +121,7 @@ class MLPlay:
         self.epsilon = 1.0
         self.progress = 0
         self.total_rewards = []
-        self.best_mean = 0
+        self.best_mean = -100000
         # TODO create any variables you need **********************************************************************#
         self.action_space = [
             (False, False, 0.0),
@@ -225,7 +225,8 @@ class MLPlay:
             # Continue the game
 
             # TODO You can decide your own action (change the following action to yours) *****************************#
-            self.epsilon = epsilon_compute(frame_id=self.total_steps, epsilon_decay=100000)
+            # self.epsilon = epsilon_compute(frame_id=self.total_steps, epsilon_max=0.4, epsilon_decay=100000)
+            self.epsilon = 0
             action_id = self.agent.choose_action(state_img, self.epsilon)
             action = PAIA.create_action_object(*self.action_space[action_id])
 
@@ -286,10 +287,10 @@ class MLPlay:
         return action
 
     def autosave(self):
-        now = datetime.now()
-        fname = 'Episode_{}_{}{}_{}{}.pt'.format(str(self.episode_number).zfill(3), str(now.month).zfill(2), str(now.day).zfill(2), str(now.hour).zfill(2), str(now.minute).zfill(2))
-        model_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'autosave', fname)
-        torch.save(self.agent.net.state_dict(), model_path)
+        # now = datetime.now()
+        # fname = 'Episode_{}_{}{}_{}{}.pt'.format(str(self.episode_number).zfill(3), str(now.month).zfill(2), str(now.day).zfill(2), str(now.hour).zfill(2), str(now.minute).zfill(2))
+        # model_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'autosave', fname)
+        # torch.save(self.agent.net.state_dict(), model_path)
         '''
         self.autosave() will be called when the game restarts,
         You can save some important information in case that accidents happen.
