@@ -224,7 +224,7 @@ class MLPlay:
         self.state_back_stack.append(state_back_img)
 
         self.agent.learn()
-        logging.info('Step: {}'.format(self.step))
+        # logging.info('Step: {}'.format(self.step))
 
         if self.step >= 44 and self.step % self.k == 0:
             r = self.get_reward(state)
@@ -259,7 +259,7 @@ class MLPlay:
         if self.episode_number < MAX_EPISODES and self.cnt > 10:
             self.total_rewards.append(self.episode_reward)
             logging.info('Epispde: ' + str(self.episode_number) + ', Epsilon: ' + str(
-                self.epsilon) + ', Progress: %.3f' % self.progress + ', Reward: ' + str(self.episode_reward))
+                self.epsilon) + ', Progress: %.3f' % state.observation.progress + ', Reward: ' + str(self.episode_reward))
             mean_reward = np.mean(self.total_rewards[-30:])
             if self.best_mean < mean_reward:
                 print("Best mean reward updated %.3f -> %.3f, model saved" % (self.best_mean, mean_reward))
@@ -315,7 +315,7 @@ class MLPlay:
                 # self.demo.export('kart.paia')
             self.total_rewards.append(self.episode_reward)
             logging.info('Epispde: ' + str(self.episode_number) + ', Epsilon: ' + str(
-                self.epsilon) + ', Progress: %.3f' % self.progress + ', Reward: ' + str(self.episode_reward))
+                self.epsilon) + ', Progress: %.3f' % state.observation.progress + ', Reward: ' + str(self.episode_reward))
             mean_reward = np.mean(self.total_rewards[-30:])
             if self.best_mean < mean_reward:
                 print("Best mean reward updated %.3f -> %.3f, model saved" % (self.best_mean, mean_reward))
