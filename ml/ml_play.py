@@ -11,7 +11,8 @@ import collections
 from dqn_model import *
 from datetime import datetime
 
-Experience = collections.namedtuple('Experience', field_names=['state', 'action', 'reward', 'done', 'new_state'])
+Experience = collections.namedtuple('Experience',
+                                    field_names=['state', 'action', 'reward', 'done', 'new_state', 'state_info'])
 
 
 class ExperienceBuffer:
@@ -26,9 +27,9 @@ class ExperienceBuffer:
 
     def sample(self, batch_size):
         indices = np.random.choice(len(self.buffer), batch_size, replace=False)
-        states, actions, rewards, dones, next_states = zip(*[self.buffer[idx] for idx in indices])
+        states, actions, rewards, dones, next_states, state_info = zip(*[self.buffer[idx] for idx in indices])
         return np.array(states), np.array(actions), np.array(rewards, dtype=np.float32), \
-            np.array(dones, dtype=np.uint8), np.array(next_states)
+            np.array(dones, dtype=np.uint8), np.array(next_states), np.array(state_info, dtype=np.float32)
 
 
 class DeepQNetwork():
@@ -36,6 +37,7 @@ class DeepQNetwork():
             self,
             n_actions,
             input_shape,
+            state_info_size,
             qnet,
             device,
             learning_rate=2e-4,
@@ -47,6 +49,7 @@ class DeepQNetwork():
         # initialize parameters
         self.n_actions = n_actions
         self.input_shape = input_shape
+        self.state_info_size = state_info_size
         self.lr = learning_rate
         self.gamma = reward_decay
         self.replace_target_iter = replace_target_iter
@@ -57,35 +60,37 @@ class DeepQNetwork():
         self.exp_buffer = ExperienceBuffer(memory_size)
 
         # Network
-        self.net = qnet(self.input_shape, self.n_actions).to(self.device)
-        self.tgt_net = qnet(self.input_shape, self.n_actions).to(self.device)
+        self.net = qnet(self.input_shape, self.n_actions, state_info_size).to(self.device)
+        self.tgt_net = qnet(self.input_shape, self.n_actions, state_info_size).to(self.device)
         self.optimizer = optim.Adam(self.net.parameters(), lr=self.lr)
 
     def calc_loss(self):
-        states, actions, rewards, dones, next_states = self.exp_buffer.sample(self.batch_size)
+        states, actions, rewards, dones, next_states, state_info = self.exp_buffer.sample(self.batch_size)
 
         states_v = torch.tensor(np.array(states, copy=False)).to(self.device)
         next_states_v = torch.tensor(np.array(next_states, copy=False)).to(self.device)
         actions_v = torch.tensor(actions).to(self.device)
         rewards_v = torch.tensor(rewards).to(self.device)
         done_mask = torch.BoolTensor(dones).to(self.device)
+        state_info_v = torch.tensor(state_info).to(self.device)
 
-        state_action_values = self.net(states_v.float()).gather(1, actions_v.unsqueeze(-1).type(torch.int64)).squeeze(
+        state_action_values = self.net.forward(states_v.float(), state_info_v).gather(1, actions_v.unsqueeze(-1).type(torch.int64)).squeeze(
             -1)
         with torch.no_grad():
-            next_state_values = self.tgt_net(next_states_v.float()).max(1)[0]
+            next_state_values = self.tgt_net(next_states_v.float(), state_info_v).max(1)[0]
             next_state_values[done_mask] = 0.0
             next_state_values = next_state_values.detach()
 
         expected_state_action_values = next_state_values * self.gamma + rewards_v
         return nn.MSELoss()(state_action_values, expected_state_action_values)
 
-    def choose_action(self, state, epsilon=0.0):
+    def choose_action(self, state, state_info, epsilon=0.0):
         if np.random.random() < epsilon:
             act_v = np.random.randint(self.n_actions)
         else:
             state_v = torch.tensor([state]).to(self.device)
-            q_vals_v = self.net(state_v.float())
+            state_info_v = torch.tensor([state_info], dtype=torch.float32).to(self.device)
+            q_vals_v = self.net(state_v.float(), state_info_v)
             _, act_v = torch.max(q_vals_v, dim=1)
         action = int(act_v)
         return action
@@ -101,8 +106,8 @@ class DeepQNetwork():
             self.optimizer.step()
         self.learn_step_counter += 1
 
-    def store_transition(self, s, a, r, d, s_):
-        exp = Experience(s, a, r, d, s_)
+    def store_transition(self, s, a, r, d, s_, s_info):
+        exp = Experience(s, a, r, d, s_, s_info)
         self.exp_buffer.append(exp)
 
     def save_model(self):
@@ -134,6 +139,7 @@ class MLPlay:
         ]
         self.n_actions = len(self.action_space)
         self.img_size = (32, 64)
+        self.state_info_size = 28
         self.prev_progress = 0
         self.episode_reward = 0
         self.step = 0
@@ -146,7 +152,7 @@ class MLPlay:
         self.state_back_stack = []
         self.effects = {'n': 0, 't': 0, 'b': 0, 'w': 1.0, 'g': 1.0}
 
-        self.agent = DeepQNetwork(self.n_actions, (self.k * 2, *self.img_size), QNet, device='cpu')
+        self.agent = DeepQNetwork(self.n_actions, (self.k * 2, *self.img_size), self.state_info_size, QNet, device='cpu')
         # self.agent.net.load_state_dict(torch.load('./saves/best_0.pt'))
         # **********************************************************************************************************#
 
@@ -182,6 +188,38 @@ class MLPlay:
         resized_back_img = cv2.resize(back_img_array,  (self.img_size[1], self.img_size[0]))
         gray_back_img = cv2.cvtColor(resized_back_img, cv2.COLOR_BGR2GRAY)
         return gray_front_img, gray_back_img
+
+    def get_state_info(self, state):
+        return np.array([
+            state.observation.rays.F.hit,
+            state.observation.rays.F.distance,
+            state.observation.rays.B.hit,
+            state.observation.rays.B.distance,
+            state.observation.rays.R.hit,
+            state.observation.rays.R.distance,
+            state.observation.rays.L.hit,
+            state.observation.rays.L.distance,
+            state.observation.rays.FR.hit,
+            state.observation.rays.FR.distance,
+            state.observation.rays.RF.hit,
+            state.observation.rays.RF.distance,
+            state.observation.rays.FL.hit,
+            state.observation.rays.FL.distance,
+            state.observation.rays.LF.hit,
+            state.observation.rays.LF.distance,
+            state.observation.rays.BR.hit,
+            state.observation.rays.BR.distance,
+            state.observation.rays.BL.hit,
+            state.observation.rays.BL.distance,
+            state.observation.progress,
+            state.observation.usedtime,
+            state.observation.velocity,
+            state.observation.refills.wheel.value,
+            state.observation.refills.gas.value,
+            state.observation.effects.nitro.number,
+            state.observation.effects.turtle.number,
+            state.observation.effects.banana.number,
+        ])
 
     def get_reward(self, state):
         progress = state.observation.progress
@@ -263,6 +301,8 @@ class MLPlay:
             self.effects = {'n': 0, 't': 0, 'b': 0, 'w': 1.0, 'g': 1.0}
 
         self.step += 1
+        if self.step % 100 == 0:
+            print("Step: {}".format(self.step), end='')
 
         if not state.observation.images.front.data:
             return PAIA.create_action_object(*self.action_space[1])
@@ -272,6 +312,8 @@ class MLPlay:
         state_back_img = state_back_img[np.newaxis, ...]
         self.state_front_stack.append(state_front_img)
         self.state_back_stack.append(state_back_img)
+
+        state_info = self.get_state_info(state)
 
         self.agent.learn()
         # logging.info('Step: {}'.format(self.step))
@@ -287,23 +329,29 @@ class MLPlay:
             done = (state.event in [PAIA.Event.EVENT_RESTART, PAIA.Event.EVENT_FINISH])
 
             self.episode_reward += r
+            if self.step % 100 == 0:
+                print(', reward: {}, total_reward: {}'.format(r, self.episode_reward), end='')
 
             stacked_state = self.state_front_stack + self.state_back_stack
             # [(1, width, height), (1, width, height), ...] => (k, width, height)
             stacked_img = np.concatenate(stacked_state, axis=0)
-            self.agent.store_transition(self.curr_state, self.action_id, r, done, stacked_img)
+            self.agent.store_transition(self.curr_state, self.action_id, r, done, stacked_img, state_info)
 
         if self.step % self.k == 0:
             stacked_state = self.state_front_stack + self.state_back_stack
             stacked_img = np.concatenate(stacked_state, axis=0)     # (k*2, width, height)
+            # stacked_img = np.concatenate(self.state_front_stack, axis=0)     # (k*2, width, height)
+
             self.curr_state = stacked_img
             self.state_back_stack = []
             self.state_front_stack = []
 
             self.frame_idx += 1     # nth state
             self.epsilon = epsilon_compute(frame_id=self.frame_idx)
+            if self.step % 100 == 0:
+                print(', epsilon: {}'.format(self.epsilon))
             # self.epsilon = 0
-            self.action_id = self.agent.choose_action(self.curr_state, self.epsilon)
+            self.action_id = self.agent.choose_action(self.curr_state, state_info, self.epsilon)
 
         # *********************************************************************************************************#
 
