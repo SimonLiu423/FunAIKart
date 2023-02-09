@@ -144,26 +144,30 @@ class MLPlay:
         self.curr_state = None
         self.state_front_stack = []
         self.state_back_stack = []
-        self.effects = {'n': 0, 't': 0, 'b': 0, 'w': 0, 'g': 0}
-
+        self.effects = {'n': 0, 't': 0, 'b': 0, 'w': 1.0, 'g': 1.0}
 
         self.agent = DeepQNetwork(self.n_actions, (self.k * 2, *self.img_size), QNet, device='cpu')
         # self.agent.net.load_state_dict(torch.load('./saves/best_0.pt'))
         # **********************************************************************************************************#
 
-    # def effect_diff(self, state):
-    #     self.new_effects = {
-    #         'n': state.observation.effects.nitro,
-    #         't': state.observation.effects.nitro,
-    #         'b': state.observation.effects.nitro,
-    #         'w': state.observation.effects.nitro,
-    #         'g': state.observation.effects.nitro,
-    #     }
-    #     diff = {
-    #         'n': state.observation.effects.nitro - self.effects['n'],
-    #         't': state.observation.effects.turtle - self.effects['t'],
-    #
-    #     }
+    def effect_diff(self, state):
+        new_effects = {
+            'n': state.observation.effects.nitro.number,
+            't': state.observation.effects.turtle.number,
+            'b': state.observation.effects.banana.number,
+            'w': state.observation.refills.wheel.value,
+            'g': state.observation.refills.gas.value,
+        }
+        logging.info('wheel: {}, gas: {}'.format(state.observation.refills.wheel.value, state.observation.refills.gas.value))
+        diff = {
+            'n': new_effects['n'] - self.effects['n'],
+            't': new_effects['t'] - self.effects['t'],
+            'b': new_effects['b'] - self.effects['b'],
+            'w': new_effects['w'] - self.effects['w'],
+            'g': new_effects['g'] - self.effects['g'],
+        }
+        self.effects = new_effects
+        return diff
 
     def preprocess(self, state):
         front_img_array = PAIA.image_to_array(state.observation.images.front.data)  # img_array.shape = (112, 252, 3)
@@ -203,12 +207,26 @@ class MLPlay:
             ret += -3
 
         # TODO get item reward
+        effect_diff = self.effect_diff(state)
+
+        if effect_diff['t'] > 0 or effect_diff['b'] > 0:
+            ret += -5 + 3
+
+        if effect_diff['w'] > 0:
+            ret += effect_diff['w'] + 3
+
+        if effect_diff['g'] > 0:
+            ret += effect_diff['g'] + 3
+
+        if effect_diff['n'] > 0:
+            ret += 3
 
         if state.event in [PAIA.Event.EVENT_TIMEOUT, PAIA.Event.EVENT_UNDRIVABLE]:
             ret += -5
         elif state.event == PAIA.Event.EVENT_WIN:
             ret += 10
 
+        logging.info('reward: {}'.format(ret))
         return ret
 
     def decision(self, state: PAIA.State) -> PAIA.Action:
@@ -255,7 +273,7 @@ class MLPlay:
         self.state_back_stack.append(state_back_img)
 
         self.agent.learn()
-        logging.info('Step: {}'.format(self.step))
+        # logging.info('Step: {}'.format(self.step))
 
         if self.step >= 75 and self.step % self.k == 0:
             delta_progress = (state.observation.progress - self.prev_progress) * 1000
