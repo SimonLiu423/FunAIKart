@@ -6,3 +6,4 @@ kart/*
 kart/Linux/kart_Data/ML-Agents/Timers/PAIAScene_timers.json
 ml/__pycache__/dqn_model.cpython-38.pyc
 ml/__pycache__/ml_play.cpython-38.pyc
+.python-version

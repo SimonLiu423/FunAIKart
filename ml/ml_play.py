@@ -134,34 +134,44 @@ class MLPlay:
         ]
         self.n_actions = len(self.action_space)
         self.img_size = (100, 100)
-        self.agent = DeepQNetwork(self.n_actions, (1, *self.img_size), QNet, device='cuda')
+        self.agent = DeepQNetwork(self.n_actions, (1, *self.img_size), QNet, device='cpu')
         self.prev_progress = 0
-        self.prev_sa = (None, None)
         self.episode_reward = 0
         self.step = 0
-        self.total_steps = 0
+        self.frame_idx = 0
+        self.cnt = 0
+        self.k = 4
+        self.action_id = 1
+        self.state = None
+        self.state_front_stack = []
+        self.state_back_stack = []
 
         self.agent.net.load_state_dict(torch.load('./saves/best_0.pt'))
         # **********************************************************************************************************#
 
     def preprocess(self, state):
-        img_array = PAIA.image_to_array(state.observation.images.front.data)  # img_array.shape = (112, 252, 3)
+        front_img_array = PAIA.image_to_array(state.observation.images.front.data)  # img_array.shape = (112, 252, 3)
+        back_img_array = PAIA.image_to_array(state.observation.images.back.data)  # img_array.shape = (112, 252, 3)
         # TODO Image Preprocessing ****************#
         # Hint:
         #      GrayScale: img  = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
         #      Resize:    img  = cv2.resize(img, (width, height))
-        resized_img = cv2.resize(img_array, self.img_size)
-        gray_img = cv2.cvtColor(resized_img, cv2.COLOR_BGR2GRAY)
-        return gray_img
+        resized_front_img = cv2.resize(front_img_array, self.img_size)
+        gray_front_img = cv2.cvtColor(resized_front_img, cv2.COLOR_BGR2GRAY)
+
+        resized_back_img = cv2.resize(back_img_array, self.img_size)
+        gray_back_img = cv2.cvtColor(resized_back_img, cv2.COLOR_BGR2GRAY)
+        return gray_front_img, gray_back_img
 
     def get_reward(self, state):
         progress = state.observation.progress
+        ret = 0
         if progress > self.prev_progress:
-            ret = 1.0
+            ret += 1.0
         elif progress == self.prev_progress:
-            ret = -1.0
+            ret += -1.0
         else:
-            ret = -2.0
+            ret += -2.0
 
         if state.observation.rays.F.distance <= 0.05 or \
                 state.observation.rays.B.distance <= 0.05 or \
@@ -173,13 +183,13 @@ class MLPlay:
                 state.observation.rays.LF.distance <= 0.05 or \
                 state.observation.rays.BR.distance <= 0.05 or \
                 state.observation.rays.BL.distance <= 0.05:
-            ret = -3
+            ret += -3
 
         self.prev_progress = progress
         if state.event in [PAIA.Event.EVENT_TIMEOUT, PAIA.Event.EVENT_UNDRIVABLE]:
-            ret = -5
+            ret += -5
         elif state.event == PAIA.Event.EVENT_WIN:
-            ret = 10
+            ret += 10
 
         return ret
 
@@ -202,36 +212,67 @@ class MLPlay:
         # 5. Train Q-Network
         MAX_EPISODES = int(ENV.get('MAX_EPISODES') or -1)
 
+        self.step += 1
+
         if not state.observation.images.front.data:
             return PAIA.create_action_object(*self.action_space[1])
 
-        state_img = self.preprocess(state)
-        state_img = state_img[np.newaxis, ...]
+        state_front_img, state_back_img = self.preprocess(state)
+        state_front_img = state_front_img[np.newaxis, ...]
+        state_back_img = state_back_img[np.newaxis, ...]
+        self.state_front_stack.append(state_front_img)
+        self.state_back_stack.append(state_back_img)
 
-        r = self.get_reward(state)
-
-        done = state.event in [PAIA.Event.EVENT_RESTART, PAIA.Event.EVENT_FINISH]
-
-        if self.prev_sa is not (None, None):
-            self.agent.store_transition(self.prev_sa[0], self.prev_sa[1], r, done, state_img)
-            # if self.step % 100 == 0:
-                # logging.info('Stored transition, (action: {}, reward: {})'.format(self.prev_sa[1], r))
-            self.episode_reward += r
         self.agent.learn()
+        logging.info('Step: {}'.format(self.step))
+
+        if self.step >= 44 and self.step % self.k == 0:
+            r = self.get_reward(state)
+            done = (state.event in [PAIA.Event.EVENT_RESTART, PAIA.Event.EVENT_FINISH])
+
+            self.episode_reward += r
+
+            if r < 0.1:
+                self.cnt += 1
+            else:
+                self.cnt = 0
+
+            stacked_state = self.state_front_stack + self.state_back_stack
+            stacked_img = np.concatenate(stacked_state, axis=0)
+
+            self.agent.store_transition(self.state, self.action_id, r, done, stacked_img)
+
+        if self.step % self.k == 0:
+            stacked_state = self.state_front_stack + self.state_back_stack
+            stacked_img = np.concatenate(stacked_state, axis=0)
+            self.state = stacked_img
+            self.state_back_stack = []
+            self.state_front_stack = []
+
+            self.frame_idx += 1
+            self.epsilon = epsilon_compute(frame_id=self.frame_idx)
+            # self.epsilon = 0
+            self.action_id = self.agent.choose_action(state, self.epsilon)
 
         # *********************************************************************************************************#
 
-        if state.event == PAIA.Event.EVENT_NONE:
+        action = PAIA.create_action_object(True, False, 0.0)
+        if self.episode_number < MAX_EPISODES and self.cnt > 10:
+            self.total_rewards.append(self.episode_reward)
+            logging.info('Epispde: ' + str(self.episode_number) + ', Epsilon: ' + str(
+                self.epsilon) + ', Progress: %.3f' % self.progress + ', Reward: ' + str(self.episode_reward))
+            mean_reward = np.mean(self.total_rewards[-30:])
+            if self.best_mean < mean_reward:
+                print("Best mean reward updated %.3f -> %.3f, model saved" % (self.best_mean, mean_reward))
+                self.best_mean = mean_reward
+                self.agent.save_model()
+
+            action = PAIA.create_action_object(command=PAIA.Command.COMMAND_RESTART)
+        elif state.event == PAIA.Event.EVENT_NONE:
             # Continue the game
 
             # TODO You can decide your own action (change the following action to yours) *****************************#
-            # self.epsilon = epsilon_compute(frame_id=self.total_steps, epsilon_max=0.4, epsilon_decay=100000)
-            self.epsilon = 0
-            action_id = self.agent.choose_action(state_img, self.epsilon)
-            action = PAIA.create_action_object(*self.action_space[action_id])
-
-            self.prev_sa = (state_img, action_id)
-
+            action = PAIA.create_action_object(*self.action_space[self.action_id])
             # *********************************************************************************************************#
 
             # You can save the step to the replay buffer (self.demo)
@@ -243,10 +284,15 @@ class MLPlay:
             # TODO Do anything you want when the game reset *********************************************************#
 
             self.episode_number += 1
-            self.prev_sa = (None, None)
             self.episode_reward = 0
+
+            self.prev_progress = 0
             self.step = 0
-            action = PAIA.create_action_object(*self.action_space[1])
+            self.cnt = 0
+            self.action_id = 1
+            self.state = None
+            self.state_front_stack = []
+            self.state_back_stack = []
 
             # *********************************************************************************************************#
 
@@ -282,8 +328,6 @@ class MLPlay:
                 # ********************************************************************#
 
         ##logging.debug(PAIA.action_info(action))
-        self.step += 1
-        self.total_steps += 1
         return action
 
     def autosave(self):
