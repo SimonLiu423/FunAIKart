@@ -134,7 +134,6 @@ class MLPlay:
         ]
         self.n_actions = len(self.action_space)
         self.img_size = (100, 100)
-        self.agent = DeepQNetwork(self.n_actions, (1, *self.img_size), QNet, device='cpu')
         self.prev_progress = 0
         self.episode_reward = 0
         self.step = 0
@@ -142,11 +141,12 @@ class MLPlay:
         self.cnt = 0
         self.k = 4
         self.action_id = 1
-        self.state = None
+        self.curr_state = None
         self.state_front_stack = []
         self.state_back_stack = []
 
-        self.agent.net.load_state_dict(torch.load('./saves/best_0.pt'))
+        self.agent = DeepQNetwork(self.n_actions, (self.k * 2, *self.img_size), QNet, device='cuda')
+        # self.agent.net.load_state_dict(torch.load('./saves/best_0.pt'))
         # **********************************************************************************************************#
 
     def preprocess(self, state):
@@ -239,20 +239,20 @@ class MLPlay:
 
             stacked_state = self.state_front_stack + self.state_back_stack
             stacked_img = np.concatenate(stacked_state, axis=0)
-
-            self.agent.store_transition(self.state, self.action_id, r, done, stacked_img)
+            logging.info(stacked_img.shape)
+            self.agent.store_transition(self.curr_state, self.action_id, r, done, stacked_img)
 
         if self.step % self.k == 0:
             stacked_state = self.state_front_stack + self.state_back_stack
             stacked_img = np.concatenate(stacked_state, axis=0)
-            self.state = stacked_img
+            self.curr_state = stacked_img
             self.state_back_stack = []
             self.state_front_stack = []
 
             self.frame_idx += 1
             self.epsilon = epsilon_compute(frame_id=self.frame_idx)
             # self.epsilon = 0
-            self.action_id = self.agent.choose_action(state, self.epsilon)
+            self.action_id = self.agent.choose_action(self.curr_state, self.epsilon)
 
         # *********************************************************************************************************#
 
@@ -290,7 +290,6 @@ class MLPlay:
             self.step = 0
             self.cnt = 0
             self.action_id = 1
-            self.state = None
             self.state_front_stack = []
             self.state_back_stack = []
 
