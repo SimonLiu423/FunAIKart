@@ -26,7 +26,7 @@ class MLPlay:
         self.state_back_stack = []
         self.device = 'cpu'
 
-        self.qnet = QNet((self.k * 2, *self.img_size), self.n_actions, self.state_info_size)
+        self.qnet = QNet((self.k * 2, *self.img_size), self.n_actions)
         fname = os.path.join(os.path.dirname(os.path.abspath(__file__)), "best_model.dat")
         self.qnet.load_state_dict(torch.load(fname))
         self.qnet.eval()
@@ -43,8 +43,6 @@ class MLPlay:
         self.state_front_stack.append(state_front_img)
         self.state_back_stack.append(state_back_img)
 
-        state_info = self.get_state_info(state)
-
         if self.step % self.k == 0:
             stacked_state = self.state_front_stack + self.state_back_stack
             stacked_img = np.concatenate(stacked_state, axis=0)
@@ -52,7 +50,7 @@ class MLPlay:
             self.state_front_stack = []
             self.state_back_stack = []
 
-            self.action_id = self.choose_action(stacked_img, state_info, 0)
+            self.action_id = self.choose_action(stacked_img, 0)
 
         action = PAIA.create_action_object(True, False, 0.0)
 
@@ -69,8 +67,7 @@ class MLPlay:
             act_v = np.random.randint(self.n_actions)
         else:
             state_v = torch.tensor([state]).to(self.device)
-            state_info_v = torch.tensor([state_info], dtype=torch.float32).to(self.device)
-            q_vals_v = self.qnet(state_v.float(), state_info_v)
+            q_vals_v = self.qnet(state_v.float())
             _, act_v = torch.max(q_vals_v, dim=1)
         action = int(act_v)
         return action
@@ -88,35 +85,3 @@ class MLPlay:
         resized_back_img = cv2.resize(back_img_array, (self.img_size[1], self.img_size[0]))
         gray_back_img = cv2.cvtColor(resized_back_img, cv2.COLOR_BGR2GRAY)
         return gray_front_img, gray_back_img
-
-    def get_state_info(self, state):
-        return np.array([
-            state.observation.rays.F.hit,
-            state.observation.rays.F.distance,
-            state.observation.rays.B.hit,
-            state.observation.rays.B.distance,
-            state.observation.rays.R.hit,
-            state.observation.rays.R.distance,
-            state.observation.rays.L.hit,
-            state.observation.rays.L.distance,
-            state.observation.rays.FR.hit,
-            state.observation.rays.FR.distance,
-            state.observation.rays.RF.hit,
-            state.observation.rays.RF.distance,
-            state.observation.rays.FL.hit,
-            state.observation.rays.FL.distance,
-            state.observation.rays.LF.hit,
-            state.observation.rays.LF.distance,
-            state.observation.rays.BR.hit,
-            state.observation.rays.BR.distance,
-            state.observation.rays.BL.hit,
-            state.observation.rays.BL.distance,
-            state.observation.progress,
-            state.observation.usedtime,
-            state.observation.velocity,
-            state.observation.refills.wheel.value,
-            state.observation.refills.gas.value,
-            state.observation.effects.nitro.number,
-            state.observation.effects.turtle.number,
-            state.observation.effects.banana.number,
-        ])
